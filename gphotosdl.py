@@ -53,40 +53,42 @@ class GoogleAuth:
 
     def authorize(self):
         """Run OAuth flow"""
+        # Load saved token if it exists
         if os.path.exists(TOKEN_FILE):
             with open(TOKEN_FILE, 'rb') as f:
                 saved = pickle.load(f)
-                self.token = saved.get('token')
-                self.refresh_token = saved.get('refresh_token')
-                self.token_expiry = saved.get('token_expiry')
-                self.scopes = saved.get('scopes', [])
 
-                # Check if scopes match what we need
-                if set(self.scopes) != set(SCOPES):
-                    print("Saved token has different scopes, re-authenticating...")
-                    os.remove(TOKEN_FILE)
-                    self.token = None
-                    self.refresh_token = None
-                # Check if token is expired
-                elif self.token_expiry and time.time() >= self.token_expiry:
-                    if self.refresh_token:
-                        print("Token expired, refreshing...")
-                        try:
-                            self._refresh_token()
-                            return
-                        except Exception as e:
-                            print(f"Token refresh failed: {e}, re-authenticating...")
-                            os.remove(TOKEN_FILE)
-                            self.token = None
-                            self.refresh_token = None
-                    else:
-                        print("Token expired and no refresh token, re-authenticating...")
+            self.token = saved.get('token')
+            self.refresh_token = saved.get('refresh_token')
+            self.token_expiry = saved.get('token_expiry')
+            self.scopes = saved.get('scopes', [])
+
+            # Check if scopes match what we need
+            if set(self.scopes) != set(SCOPES):
+                print("Saved token has different scopes, re-authenticating...")
+                os.remove(TOKEN_FILE)
+                self.token = None
+                self.refresh_token = None
+            # Check if token is expired
+            elif self.token_expiry and time.time() >= self.token_expiry:
+                if self.refresh_token:
+                    print("Token expired, refreshing...")
+                    try:
+                        self._refresh_token()
+                        return
+                    except Exception as e:
+                        print(f"Token refresh failed: {e}, re-authenticating...")
                         os.remove(TOKEN_FILE)
                         self.token = None
                         self.refresh_token = None
-                elif self.token:
-                    print("Using saved credentials")
-                    return
+                else:
+                    print("Token expired and no refresh token, re-authenticating...")
+                    os.remove(TOKEN_FILE)
+                    self.token = None
+                    self.refresh_token = None
+            elif self.token:
+                print("Using saved credentials")
+                return
 
         if not self.token:
             self._do_auth_flow()
