@@ -16,6 +16,7 @@ import webbrowser
 import hashlib
 import base64
 import secrets
+import time
 from zipfile import ZipFile
 from urllib.parse import urlparse, parse_qs
 
@@ -47,6 +48,8 @@ class GoogleAuth:
 
         self.token = None
         self.refresh_token = None
+        self.token_expiry = None
+        self.scopes = None
 
     def authorize(self):
         """Run OAuth flow"""
@@ -55,10 +58,41 @@ class GoogleAuth:
                 saved = pickle.load(f)
                 self.token = saved.get('token')
                 self.refresh_token = saved.get('refresh_token')
-                if self.token:
+                self.token_expiry = saved.get('token_expiry')
+                self.scopes = saved.get('scopes', [])
+
+                # Check if scopes match what we need
+                if set(self.scopes) != set(SCOPES):
+                    print("Saved token has different scopes, re-authenticating...")
+                    os.remove(TOKEN_FILE)
+                    self.token = None
+                    self.refresh_token = None
+                # Check if token is expired
+                elif self.token_expiry and time.time() >= self.token_expiry:
+                    if self.refresh_token:
+                        print("Token expired, refreshing...")
+                        try:
+                            self._refresh_token()
+                            return
+                        except Exception as e:
+                            print(f"Token refresh failed: {e}, re-authenticating...")
+                            os.remove(TOKEN_FILE)
+                            self.token = None
+                            self.refresh_token = None
+                    else:
+                        print("Token expired and no refresh token, re-authenticating...")
+                        os.remove(TOKEN_FILE)
+                        self.token = None
+                        self.refresh_token = None
+                elif self.token:
                     print("Using saved credentials")
                     return
 
+        if not self.token:
+            self._do_auth_flow()
+
+    def _do_auth_flow(self):
+        """Perform the OAuth authorization flow"""
         # Generate PKCE verifier and challenge
         code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
         code_challenge = base64.urlsafe_b64encode(
@@ -111,15 +145,53 @@ class GoogleAuth:
 
         self.token = token_data['access_token']
         self.refresh_token = token_data.get('refresh_token')
+        expires_in = token_data.get('expires_in', 3600)
+        self.token_expiry = time.time() + expires_in
+        self.scopes = SCOPES
 
         # Save tokens
         with open(TOKEN_FILE, 'wb') as f:
             pickle.dump({
                 'token': self.token,
-                'refresh_token': self.refresh_token
+                'refresh_token': self.refresh_token,
+                'token_expiry': self.token_expiry,
+                'scopes': self.scopes
             }, f)
 
         print("Authentication successful!")
+
+    def _refresh_token(self):
+        """Refresh the access token using the refresh token"""
+        token_params = {
+            'client_id': self.client_id,
+            'client_secret': self.client_secret,
+            'refresh_token': self.refresh_token,
+            'grant_type': 'refresh_token'
+        }
+
+        req = urllib.request.Request(
+            'https://oauth2.googleapis.com/token',
+            data=urllib.parse.urlencode(token_params).encode('utf-8'),
+            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+        )
+
+        response = urllib.request.urlopen(req)
+        token_data = json.loads(response.read().decode('utf-8'))
+
+        self.token = token_data['access_token']
+        expires_in = token_data.get('expires_in', 3600)
+        self.token_expiry = time.time() + expires_in
+
+        # Save updated token
+        with open(TOKEN_FILE, 'wb') as f:
+            pickle.dump({
+                'token': self.token,
+                'refresh_token': self.refresh_token,
+                'token_expiry': self.token_expiry,
+                'scopes': self.scopes
+            }, f)
+
+        print("Token refreshed successfully!")
 
 class PhotoDownloader:
     def __init__(self):
@@ -146,7 +218,24 @@ class PhotoDownloader:
             response = urllib.request.urlopen(req)
             return json.loads(response.read().decode('utf-8'))
         except urllib.error.HTTPError as e:
-            print(f"API Error: {e.code} - {e.read().decode('utf-8')}")
+            error_body = e.read().decode('utf-8')
+            print(f"API Error: {e.code} - {error_body}")
+
+            # Check for scope/authentication issues
+            if e.code == 403 or e.code == 401:
+                try:
+                    error_data = json.loads(error_body)
+                    error_message = error_data.get('error', {}).get('message', '')
+                    if 'insufficient authentication scopes' in error_message.lower() or 'invalid' in error_message.lower():
+                        print("\nAuthentication issue detected!")
+                        print("Deleting saved token and re-authenticating...")
+                        if os.path.exists(TOKEN_FILE):
+                            os.remove(TOKEN_FILE)
+                        print("\nPlease run the script again to re-authenticate with the correct scopes.")
+                        exit(1)
+                except:
+                    pass
+
             raise
 
     def load_state(self):
