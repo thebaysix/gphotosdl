@@ -247,6 +247,38 @@ class PhotoDownloader:
                 print(f"\n⚠️  WARNING: Token does not include 'photoslibrary' scope!")
                 print(f"  This will cause API calls to fail.")
                 print(f"  Please check your OAuth consent screen configuration.")
+                return
+
+            # Test if Photos Library API is accessible
+            print("\nTesting Photos Library API access...")
+            try:
+                test_url = 'https://photoslibrary.googleapis.com/v1/mediaItems?pageSize=1'
+                headers = {
+                    'Authorization': f'Bearer {self.auth.token}',
+                    'Content-Type': 'application/json'
+                }
+                test_req = urllib.request.Request(test_url, headers=headers)
+                test_response = urllib.request.urlopen(test_req)
+                print(f"✓ Photos Library API is accessible")
+            except urllib.error.HTTPError as api_error:
+                error_body = api_error.read().decode('utf-8')
+                print(f"\n❌ Photos Library API test failed!")
+                print(f"   Status: {api_error.code}")
+                print(f"   Error: {error_body}")
+
+                if api_error.code == 403:
+                    print(f"\n   DIAGNOSIS:")
+                    print(f"   Your token has the correct scope, but the API call is being rejected.")
+                    print(f"   This usually means:")
+                    print(f"   1. Photos Library API is NOT enabled in your Google Cloud project")
+                    print(f"   2. You are not added as a test user in the OAuth consent screen")
+                    print(f"   3. There's a mismatch between your credentials.json project and API settings")
+                    print(f"\n   Please verify:")
+                    print(f"   A. Go to: https://console.cloud.google.com/apis/library/photoslibrary.googleapis.com")
+                    print(f"      Make sure it shows 'API enabled' (green checkmark)")
+                    print(f"   B. Go to: https://console.cloud.google.com/apis/credentials/consent")
+                    print(f"      Under 'Test users', make sure your email is listed")
+                    print(f"   C. Check that your credentials.json is from the SAME project")
 
         except Exception as e:
             print(f"⚠️  Token validation failed: {e}")
