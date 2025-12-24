@@ -149,7 +149,26 @@ class GoogleAuth:
         self.refresh_token = token_data.get('refresh_token')
         expires_in = token_data.get('expires_in', 3600)
         self.token_expiry = time.time() + expires_in
-        self.scopes = SCOPES
+
+        # Get the scopes that were actually granted
+        granted_scopes = token_data.get('scope', '')
+        if granted_scopes:
+            self.scopes = granted_scopes.split(' ')
+            print(f"Granted scopes: {self.scopes}")
+        else:
+            self.scopes = SCOPES
+            print(f"No scope info in token response, assuming: {self.scopes}")
+
+        # Check if we got the scopes we need
+        required_scope = 'https://www.googleapis.com/auth/photoslibrary.readonly'
+        if required_scope not in self.scopes:
+            print(f"\n⚠️  WARNING: Required scope not granted!")
+            print(f"   Required: {required_scope}")
+            print(f"   Granted:  {self.scopes}")
+            print(f"\n   This usually means:")
+            print(f"   1. Photos Library API is not enabled in Google Cloud Console")
+            print(f"   2. The scope is not added to the OAuth consent screen")
+            print(f"\n   Please check your Google Cloud Console setup.")
 
         # Save tokens
         with open(TOKEN_FILE, 'wb') as f:
@@ -391,10 +410,23 @@ def main():
         print("ERROR: credentials.json not found!")
         print("\nPlease follow these steps:")
         print("1. Go to https://console.cloud.google.com/")
-        print("2. Create a new project")
-        print("3. Enable 'Photos Library API'")
-        print("4. Create OAuth 2.0 credentials (Desktop app)")
-        print("5. Download as 'credentials.json' in this directory")
+        print("2. Create a new project (or select existing one)")
+        print("3. Enable 'Photos Library API':")
+        print("   - Go to 'APIs & Services' > 'Library'")
+        print("   - Search for 'Photos Library API'")
+        print("   - Click 'Enable'")
+        print("4. Configure OAuth consent screen:")
+        print("   - Go to 'APIs & Services' > 'OAuth consent screen'")
+        print("   - Choose 'External' and click 'Create'")
+        print("   - Fill in app name and your email")
+        print("   - Click 'Add or Remove Scopes'")
+        print("   - Add scope: '../auth/photoslibrary.readonly'")
+        print("   - Save and continue")
+        print("5. Create OAuth 2.0 credentials:")
+        print("   - Go to 'APIs & Services' > 'Credentials'")
+        print("   - Click 'Create Credentials' > 'OAuth client ID'")
+        print("   - Choose 'Desktop app' as application type")
+        print("   - Download as 'credentials.json' in this directory")
         return
 
     downloader = PhotoDownloader()
