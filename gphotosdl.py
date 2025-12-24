@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 Google Photos Unfiled Downloader
 Standalone script - no pip install required (except standard library)
