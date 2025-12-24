@@ -224,6 +224,33 @@ class PhotoDownloader:
 
     def authenticate(self):
         self.auth.authorize()
+        # Validate the token after authentication
+        self._validate_token()
+
+    def _validate_token(self):
+        """Validate the access token by checking with Google's token info endpoint"""
+        print("\nValidating access token...")
+        try:
+            # Use Google's tokeninfo endpoint to verify the token
+            token_info_url = f'https://oauth2.googleapis.com/tokeninfo?access_token={self.auth.token}'
+            req = urllib.request.Request(token_info_url)
+            response = urllib.request.urlopen(req)
+            token_info = json.loads(response.read().decode('utf-8'))
+
+            print(f"✓ Token is valid")
+            print(f"  Expires in: {token_info.get('expires_in', 'unknown')} seconds")
+            print(f"  Scope: {token_info.get('scope', 'unknown')}")
+
+            # Check if the scope includes photoslibrary
+            scope = token_info.get('scope', '')
+            if 'photoslibrary' not in scope:
+                print(f"\n⚠️  WARNING: Token does not include 'photoslibrary' scope!")
+                print(f"  This will cause API calls to fail.")
+                print(f"  Please check your OAuth consent screen configuration.")
+
+        except Exception as e:
+            print(f"⚠️  Token validation failed: {e}")
+            print(f"  This might cause issues with API requests.")
 
     def _api_request(self, url, method='GET', body=None):
         """Make authenticated API request"""
@@ -422,6 +449,10 @@ def main():
         print("   - Click 'Add or Remove Scopes'")
         print("   - Add scope: '../auth/photoslibrary.readonly'")
         print("   - Save and continue")
+        print("   - IMPORTANT: Add test users!")
+        print("     * Click 'Add Users' under Test users")
+        print("     * Add your Google account email")
+        print("     * This is required for API access in testing mode")
         print("5. Create OAuth 2.0 credentials:")
         print("   - Go to 'APIs & Services' > 'Credentials'")
         print("   - Click 'Create Credentials' > 'OAuth client ID'")
