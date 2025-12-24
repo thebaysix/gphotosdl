@@ -279,6 +279,10 @@ class PhotoDownloader:
                     print(f"   B. Go to: https://console.cloud.google.com/apis/credentials/consent")
                     print(f"      Under 'Test users', make sure your email is listed")
                     print(f"   C. Check that your credentials.json is from the SAME project")
+                    print(f"\n   After fixing the configuration, delete token.pickle and run the script again.")
+
+                    # Exit to avoid confusing error messages
+                    exit(1)
 
         except Exception as e:
             print(f"⚠️  Token validation failed: {e}")
