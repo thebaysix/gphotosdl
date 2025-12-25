@@ -259,6 +259,17 @@ class PhotoDownloader:
             print(f"  Scope: {token_info.get('scope', 'unknown')}")
             print(f"  Audience (aud): {token_info.get('aud', 'unknown')}")
 
+            # Get user email from userinfo endpoint to verify which account is authenticated
+            try:
+                userinfo_url = 'https://www.googleapis.com/oauth2/v2/userinfo'
+                userinfo_headers = {'Authorization': f'Bearer {self.auth.token}'}
+                userinfo_req = urllib.request.Request(userinfo_url, headers=userinfo_headers)
+                userinfo_response = urllib.request.urlopen(userinfo_req)
+                userinfo = json.loads(userinfo_response.read().decode('utf-8'))
+                print(f"  Authenticated as: {userinfo.get('email', 'unknown')}")
+            except Exception as e:
+                print(f"  Could not fetch user email: {e}")
+
             # Check if the scope includes photoslibrary
             scope = token_info.get('scope', '')
             if 'photoslibrary' not in scope:
