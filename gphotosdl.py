@@ -16,6 +16,7 @@ import webbrowser
 import hashlib
 import base64
 import secrets
+import time
 from zipfile import ZipFile
 from urllib.parse import urlparse, parse_qs
 
@@ -47,18 +48,53 @@ class GoogleAuth:
 
         self.token = None
         self.refresh_token = None
+        self.token_expiry = None
+        self.scopes = None
 
     def authorize(self):
         """Run OAuth flow"""
+        # Load saved token if it exists
         if os.path.exists(TOKEN_FILE):
             with open(TOKEN_FILE, 'rb') as f:
                 saved = pickle.load(f)
-                self.token = saved.get('token')
-                self.refresh_token = saved.get('refresh_token')
-                if self.token:
-                    print("Using saved credentials")
-                    return
 
+            self.token = saved.get('token')
+            self.refresh_token = saved.get('refresh_token')
+            self.token_expiry = saved.get('token_expiry')
+            self.scopes = saved.get('scopes', [])
+
+            # Check if scopes match what we need
+            if set(self.scopes) != set(SCOPES):
+                print("Saved token has different scopes, re-authenticating...")
+                os.remove(TOKEN_FILE)
+                self.token = None
+                self.refresh_token = None
+            # Check if token is expired
+            elif self.token_expiry and time.time() >= self.token_expiry:
+                if self.refresh_token:
+                    print("Token expired, refreshing...")
+                    try:
+                        self._refresh_token()
+                        return
+                    except Exception as e:
+                        print(f"Token refresh failed: {e}, re-authenticating...")
+                        os.remove(TOKEN_FILE)
+                        self.token = None
+                        self.refresh_token = None
+                else:
+                    print("Token expired and no refresh token, re-authenticating...")
+                    os.remove(TOKEN_FILE)
+                    self.token = None
+                    self.refresh_token = None
+            elif self.token:
+                print("Using saved credentials")
+                return
+
+        if not self.token:
+            self._do_auth_flow()
+
+    def _do_auth_flow(self):
+        """Perform the OAuth authorization flow"""
         # Generate PKCE verifier and challenge
         code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
         code_challenge = base64.urlsafe_b64encode(
@@ -111,15 +147,72 @@ class GoogleAuth:
 
         self.token = token_data['access_token']
         self.refresh_token = token_data.get('refresh_token')
+        expires_in = token_data.get('expires_in', 3600)
+        self.token_expiry = time.time() + expires_in
+
+        # Get the scopes that were actually granted
+        granted_scopes = token_data.get('scope', '')
+        if granted_scopes:
+            self.scopes = granted_scopes.split(' ')
+            print(f"Granted scopes: {self.scopes}")
+        else:
+            self.scopes = SCOPES
+            print(f"No scope info in token response, assuming: {self.scopes}")
+
+        # Check if we got the scopes we need
+        required_scope = 'https://www.googleapis.com/auth/photoslibrary.readonly'
+        if required_scope not in self.scopes:
+            print(f"\n⚠️  WARNING: Required scope not granted!")
+            print(f"   Required: {required_scope}")
+            print(f"   Granted:  {self.scopes}")
+            print(f"\n   This usually means:")
+            print(f"   1. Photos Library API is not enabled in Google Cloud Console")
+            print(f"   2. The scope is not added to the OAuth consent screen")
+            print(f"\n   Please check your Google Cloud Console setup.")
 
         # Save tokens
         with open(TOKEN_FILE, 'wb') as f:
             pickle.dump({
                 'token': self.token,
-                'refresh_token': self.refresh_token
+                'refresh_token': self.refresh_token,
+                'token_expiry': self.token_expiry,
+                'scopes': self.scopes
             }, f)
 
         print("Authentication successful!")
+
+    def _refresh_token(self):
+        """Refresh the access token using the refresh token"""
+        token_params = {
+            'client_id': self.client_id,
+            'client_secret': self.client_secret,
+            'refresh_token': self.refresh_token,
+            'grant_type': 'refresh_token'
+        }
+
+        req = urllib.request.Request(
+            'https://oauth2.googleapis.com/token',
+            data=urllib.parse.urlencode(token_params).encode('utf-8'),
+            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+        )
+
+        response = urllib.request.urlopen(req)
+        token_data = json.loads(response.read().decode('utf-8'))
+
+        self.token = token_data['access_token']
+        expires_in = token_data.get('expires_in', 3600)
+        self.token_expiry = time.time() + expires_in
+
+        # Save updated token
+        with open(TOKEN_FILE, 'wb') as f:
+            pickle.dump({
+                'token': self.token,
+                'refresh_token': self.refresh_token,
+                'token_expiry': self.token_expiry,
+                'scopes': self.scopes
+            }, f)
+
+        print("Token refreshed successfully!")
 
 class PhotoDownloader:
     def __init__(self):
@@ -131,6 +224,69 @@ class PhotoDownloader:
 
     def authenticate(self):
         self.auth.authorize()
+        # Validate the token after authentication
+        self._validate_token()
+
+    def _validate_token(self):
+        """Validate the access token by checking with Google's token info endpoint"""
+        print("\nValidating access token...")
+        try:
+            # Use Google's tokeninfo endpoint to verify the token
+            token_info_url = f'https://oauth2.googleapis.com/tokeninfo?access_token={self.auth.token}'
+            req = urllib.request.Request(token_info_url)
+            response = urllib.request.urlopen(req)
+            token_info = json.loads(response.read().decode('utf-8'))
+
+            print(f"✓ Token is valid")
+            print(f"  Expires in: {token_info.get('expires_in', 'unknown')} seconds")
+            print(f"  Scope: {token_info.get('scope', 'unknown')}")
+
+            # Check if the scope includes photoslibrary
+            scope = token_info.get('scope', '')
+            if 'photoslibrary' not in scope:
+                print(f"\n⚠️  WARNING: Token does not include 'photoslibrary' scope!")
+                print(f"  This will cause API calls to fail.")
+                print(f"  Please check your OAuth consent screen configuration.")
+                return
+
+            # Test if Photos Library API is accessible
+            print("\nTesting Photos Library API access...")
+            try:
+                test_url = 'https://photoslibrary.googleapis.com/v1/mediaItems?pageSize=1'
+                headers = {
+                    'Authorization': f'Bearer {self.auth.token}',
+                    'Content-Type': 'application/json'
+                }
+                test_req = urllib.request.Request(test_url, headers=headers)
+                test_response = urllib.request.urlopen(test_req)
+                print(f"✓ Photos Library API is accessible")
+            except urllib.error.HTTPError as api_error:
+                error_body = api_error.read().decode('utf-8')
+                print(f"\n❌ Photos Library API test failed!")
+                print(f"   Status: {api_error.code}")
+                print(f"   Error: {error_body}")
+
+                if api_error.code == 403:
+                    print(f"\n   DIAGNOSIS:")
+                    print(f"   Your token has the correct scope, but the API call is being rejected.")
+                    print(f"   This usually means:")
+                    print(f"   1. Photos Library API is NOT enabled in your Google Cloud project")
+                    print(f"   2. You are not added as a test user in the OAuth consent screen")
+                    print(f"   3. There's a mismatch between your credentials.json project and API settings")
+                    print(f"\n   Please verify:")
+                    print(f"   A. Go to: https://console.cloud.google.com/apis/library/photoslibrary.googleapis.com")
+                    print(f"      Make sure it shows 'API enabled' (green checkmark)")
+                    print(f"   B. Go to: https://console.cloud.google.com/apis/credentials/consent")
+                    print(f"      Under 'Test users', make sure your email is listed")
+                    print(f"   C. Check that your credentials.json is from the SAME project")
+                    print(f"\n   After fixing the configuration, delete token.pickle and run the script again.")
+
+                    # Exit to avoid confusing error messages
+                    exit(1)
+
+        except Exception as e:
+            print(f"⚠️  Token validation failed: {e}")
+            print(f"  This might cause issues with API requests.")
 
     def _api_request(self, url, method='GET', body=None):
         """Make authenticated API request"""
@@ -146,7 +302,24 @@ class PhotoDownloader:
             response = urllib.request.urlopen(req)
             return json.loads(response.read().decode('utf-8'))
         except urllib.error.HTTPError as e:
-            print(f"API Error: {e.code} - {e.read().decode('utf-8')}")
+            error_body = e.read().decode('utf-8')
+            print(f"API Error: {e.code} - {error_body}")
+
+            # Check for scope/authentication issues
+            if e.code == 403 or e.code == 401:
+                try:
+                    error_data = json.loads(error_body)
+                    error_message = error_data.get('error', {}).get('message', '')
+                    if 'insufficient authentication scopes' in error_message.lower() or 'invalid' in error_message.lower():
+                        print("\nAuthentication issue detected!")
+                        print("Deleting saved token and re-authenticating...")
+                        if os.path.exists(TOKEN_FILE):
+                            os.remove(TOKEN_FILE)
+                        print("\nPlease run the script again to re-authenticate with the correct scopes.")
+                        exit(1)
+                except:
+                    pass
+
             raise
 
     def load_state(self):
@@ -300,10 +473,27 @@ def main():
         print("ERROR: credentials.json not found!")
         print("\nPlease follow these steps:")
         print("1. Go to https://console.cloud.google.com/")
-        print("2. Create a new project")
-        print("3. Enable 'Photos Library API'")
-        print("4. Create OAuth 2.0 credentials (Desktop app)")
-        print("5. Download as 'credentials.json' in this directory")
+        print("2. Create a new project (or select existing one)")
+        print("3. Enable 'Photos Library API':")
+        print("   - Go to 'APIs & Services' > 'Library'")
+        print("   - Search for 'Photos Library API'")
+        print("   - Click 'Enable'")
+        print("4. Configure OAuth consent screen:")
+        print("   - Go to 'APIs & Services' > 'OAuth consent screen'")
+        print("   - Choose 'External' and click 'Create'")
+        print("   - Fill in app name and your email")
+        print("   - Click 'Add or Remove Scopes'")
+        print("   - Add scope: '../auth/photoslibrary.readonly'")
+        print("   - Save and continue")
+        print("   - IMPORTANT: Add test users!")
+        print("     * Click 'Add Users' under Test users")
+        print("     * Add your Google account email")
+        print("     * This is required for API access in testing mode")
+        print("5. Create OAuth 2.0 credentials:")
+        print("   - Go to 'APIs & Services' > 'Credentials'")
+        print("   - Click 'Create Credentials' > 'OAuth client ID'")
+        print("   - Choose 'Desktop app' as application type")
+        print("   - Download as 'credentials.json' in this directory")
         return
 
     downloader = PhotoDownloader()
