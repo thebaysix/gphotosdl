@@ -45,6 +45,12 @@ class GoogleAuth:
             creds = json.load(f)
             self.client_id = creds['installed']['client_id']
             self.client_secret = creds['installed']['client_secret']
+            # Extract project_id if available
+            self.project_id = creds.get('installed', {}).get('project_id', 'unknown')
+
+        print(f"DEBUG: Loaded credentials")
+        print(f"DEBUG: Client ID: {self.client_id[:20]}...")
+        print(f"DEBUG: Project ID: {self.project_id}")
 
         self.token = None
         self.refresh_token = None
@@ -117,6 +123,8 @@ class GoogleAuth:
 
         print("Opening browser for authentication...")
         print(f"DEBUG: Using redirect URI in auth request: {REDIRECT_URI}")
+        print(f"DEBUG: Requesting scopes: {SCOPES}")
+        print(f"DEBUG: Full auth URL: {auth_url}")
         webbrowser.open(auth_url)
 
         # Start local server to catch callback
@@ -146,19 +154,26 @@ class GoogleAuth:
         response = urllib.request.urlopen(req)
         token_data = json.loads(response.read().decode('utf-8'))
 
+        print(f"\nDEBUG: Token response received")
+        print(f"DEBUG: Token response keys: {list(token_data.keys())}")
+
         self.token = token_data['access_token']
         self.refresh_token = token_data.get('refresh_token')
         expires_in = token_data.get('expires_in', 3600)
         self.token_expiry = time.time() + expires_in
 
+        print(f"DEBUG: Access token (first 20 chars): {self.token[:20]}")
+        print(f"DEBUG: Has refresh token: {self.refresh_token is not None}")
+        print(f"DEBUG: Expires in: {expires_in} seconds")
+
         # Get the scopes that were actually granted
         granted_scopes = token_data.get('scope', '')
         if granted_scopes:
             self.scopes = granted_scopes.split(' ')
-            print(f"Granted scopes: {self.scopes}")
+            print(f"DEBUG: Granted scopes from token: {self.scopes}")
         else:
             self.scopes = SCOPES
-            print(f"No scope info in token response, assuming: {self.scopes}")
+            print(f"DEBUG: No scope info in token response, assuming: {self.scopes}")
 
         # Check if we got the scopes we need
         required_scope = 'https://www.googleapis.com/auth/photoslibrary.readonly'
@@ -238,9 +253,11 @@ class PhotoDownloader:
             response = urllib.request.urlopen(req)
             token_info = json.loads(response.read().decode('utf-8'))
 
+            print(f"DEBUG: Token info response: {json.dumps(token_info, indent=2)}")
             print(f"✓ Token is valid")
             print(f"  Expires in: {token_info.get('expires_in', 'unknown')} seconds")
             print(f"  Scope: {token_info.get('scope', 'unknown')}")
+            print(f"  Audience (aud): {token_info.get('aud', 'unknown')}")
 
             # Check if the scope includes photoslibrary
             scope = token_info.get('scope', '')
@@ -258,6 +275,8 @@ class PhotoDownloader:
                     'Authorization': f'Bearer {self.auth.token}',
                     'Content-Type': 'application/json'
                 }
+                print(f"DEBUG: Test API URL: {test_url}")
+                print(f"DEBUG: Test API headers: {headers}")
                 test_req = urllib.request.Request(test_url, headers=headers)
                 test_response = urllib.request.urlopen(test_req)
                 print(f"✓ Photos Library API is accessible")
