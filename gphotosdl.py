@@ -24,7 +24,7 @@ from urllib.parse import urlparse, parse_qs
 SCOPES = ['https://www.googleapis.com/auth/photoslibrary.readonly']
 STATE_FILE = 'download_state.json'
 TOKEN_FILE = 'token.pickle'
-REDIRECT_URI = 'http://localhost:8080'
+REDIRECT_URI = 'http://localhost'
 
 class OAuthHandler(http.server.BaseHTTPRequestHandler):
     """Handler for OAuth callback"""
@@ -116,10 +116,11 @@ class GoogleAuth:
         auth_url = 'https://accounts.google.com/o/oauth2/v2/auth?' + urllib.parse.urlencode(auth_params)
 
         print("Opening browser for authentication...")
+        print(f"DEBUG: Using redirect URI in auth request: {REDIRECT_URI}")
         webbrowser.open(auth_url)
 
         # Start local server to catch callback
-        server = http.server.HTTPServer(('localhost', 8080), OAuthHandler)
+        server = http.server.HTTPServer(('localhost', 80), OAuthHandler)
         server.auth_code = None
         server.handle_request()
 
@@ -294,6 +295,10 @@ class PhotoDownloader:
             'Authorization': f'Bearer {self.auth.token}',
             'Content-Type': 'application/json'
         }
+
+        print(f"DEBUG: API Request - Method: {method}, URL: {url}")
+        print(f"DEBUG: Token (first 20 chars): {self.auth.token[:20] if self.auth.token else 'None'}")
+        print(f"DEBUG: Headers: {headers}")
 
         data = json.dumps(body).encode('utf-8') if body else None
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
