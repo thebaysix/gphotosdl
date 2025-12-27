@@ -82,6 +82,12 @@ If the download is interrupted, simply run the script again. It will:
 - Does not download metadata (EXIF data is preserved in the image files)
 - Access tokens may expire (script will re-authenticate if needed)
 
+## Privacy Policy
+
+See our [Privacy Policy](PRIVACY.md) for information about how this application handles your data.
+
+**Summary:** This tool runs entirely on your local computer. It accesses your Google Photos in read-only mode to download unfiled items. No data is collected, stored on external servers, or shared with third parties.
+
 ## License
 
 This is a standalone script provided as-is. Feel free to modify and use as needed.
